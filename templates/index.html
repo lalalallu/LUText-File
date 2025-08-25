@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>实时文本与文件交换</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 20px; background-color: #f4f7f6; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #444; }
+        #messages { border: 1px solid #e0e0e0; padding: 15px; height: 400px; overflow-y: scroll; margin-bottom: 15px; background-color: #fdfdfd; display: flex; flex-direction: column; border-radius: 6px; }
+        .message { padding: 10px 15px; border-radius: 20px; margin-bottom: 10px; max-width: 75%; word-wrap: break-word; line-height: 1.4; }
+        .message a { color: #0056b3; font-weight: 600; text-decoration: underline; }
+        .my-message { background-color: #007bff; color: white; align-self: flex-end; text-align: right; }
+        .other-message { background-color: #e9e9eb; color: #333; align-self: flex-start; text-align: left; }
+        .controls-group { margin-bottom: 15px; padding: 10px; border: 1px solid #e0e0e0; border-radius: 6px; }
+        .controls-row { display: flex; align-items: center; }
+        input[type="text"], input[type="file"] { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; margin-right: 10px; }
+        button { padding: 10px 20px; border: none; background-color: #28a745; color: white; border-radius: 20px; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #218838; }
+        button:disabled { background-color: #aaa; cursor: not-allowed; }
+        #progress-container { display: none; margin-top: 10px; }
+        progress { width: 100%; height: 25px; }
+        #progress-text { text-align: center; font-weight: bold; }
+        #file_list_container { margin-top: 20px; }
+        #file_list_content ul { list-style: none; padding: 0; }
+        #file_list_content li { margin-bottom: 5px; padding: 8px; background-color: #f1f1f1; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>实时文本与文件交换</h1>
+        <div id="messages"></div>
+
+        <div class="controls-group">
+            <div class="controls-row">
+                <input type="text" id="message_input" placeholder="输入文字..." autocomplete="off"/>
+                <button onclick="sendMessage()">发送文本</button>
+            </div>
+        </div>
+        
+        <div class="controls-group">
+            <div class="controls-row">
+                <input type="file" id="file_input" />
+                <button id="upload-btn" onclick="uploadFile()">上传文件</button>
+            </div>
+            <div id="progress-container">
+                <progress id="progress-bar" value="0" max="100"></progress>
+                <div id="progress-text">0%</div>
+            </div>
+        </div>
+        
+        <div id="file_list_container">
+            <h3>可下载文件</h3>
+            <button onclick="listFiles()">刷新列表</button>
+            <div id="file_list_content"><p>点击 "刷新列表" 查看文件。</p></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        let mySid = '';
+
+        // --- Socket.IO 事件监听 ---
+        socket.on('session_id', data => {
+            mySid = data.sid;
+            console.log("我的Session ID是: " + mySid);
+            listFiles(); // 连接成功后自动加载一次文件列表
+        });
+
+        socket.on('message_response', data => displayMessage(data.text, data.sid));
+
+        socket.on('file_uploaded', data => {
+            const link = `<a href="/uploads/${data.saved_filename}" target="_blank">上传了文件: ${data.original_filename}</a>`;
+            displayMessage(link, data.sid, true);
+            listFiles(); // 当有文件上传时，自动刷新所有客户端的文件列表
+        });
+
+        // --- 核心功能函数 ---
+        function displayMessage(content, sid, isHtml = false) {
+            const messagesDiv = document.getElementById('messages');
+            const messageElement = document.createElement('div');
+            
+            if (isHtml) {
+                messageElement.innerHTML = content;
+            } else {
+                messageElement.textContent = content;
+            }
+
+            messageElement.className = (sid === mySid) ? 'message my-message' : 'message other-message';
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('message_input');
+            const message = input.value.trim();
+            if (message) {
+                socket.emit('message', message);
+                input.value = '';
+            }
+        }
+
+        function uploadFile() {
+            const fileInput = document.getElementById('file_input');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('请先选择一个文件！');
+                return;
+            }
+            
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            const progressContainer = document.getElementById('progress-container');
+            const uploadBtn = document.getElementById('upload-btn');
+
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const xhr = new XMLHttpRequest();
+            
+            xhr.upload.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    const percentComplete = Math.round((event.loaded / event.total) * 100);
+                    progressBar.value = percentComplete;
+                    progressText.textContent = percentComplete + '%';
+                }
+            };
+            
+            xhr.onload = function() {
+                uploadBtn.disabled = false;
+                if (xhr.status === 200) {
+                    progressText.textContent = '上传完成!';
+                    const data = JSON.parse(xhr.responseText);
+                    console.log('文件上传成功:', data.filename);
+                    fileInput.value = '';
+                    setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
+                } else {
+                    progressText.textContent = '上传失败!';
+                    alert('上传失败，服务器返回错误。');
+                }
+            };
+            
+            xhr.onerror = function() {
+                uploadBtn.disabled = false;
+                progressText.textContent = '上传出错!';
+                alert('上传出错，请检查网络连接或服务器状态。');
+            };
+
+            xhr.open('POST', '/upload', true);
+            xhr.setRequestHeader('X-SocketIO-SID', mySid);
+            xhr.send(formData);
+
+            progressContainer.style.display = 'block';
+            progressBar.value = 0;
+            progressText.textContent = '0%';
+            uploadBtn.disabled = true;
+        }
+
+        function listFiles() {
+            const listContentDiv = document.getElementById('file_list_content');
+            listContentDiv.innerHTML = '<p>正在加载...</p>';
+
+            fetch('/list_files')
+            .then(response => response.json())
+            .then(data => {
+                listContentDiv.innerHTML = '';
+                if (data.success && data.files.length > 0) {
+                    const ul = document.createElement('ul');
+                    data.files.forEach(file => {
+                        const li = document.createElement('li');
+                        const link = document.createElement('a');
+                        link.href = `/uploads/${file.saved}`;
+                        link.target = '_blank';
+                        link.textContent = file.original;
+                        li.appendChild(link);
+                        ul.appendChild(li);
+                    });
+                    listContentDiv.appendChild(ul);
+                } else if (data.success) {
+                    listContentDiv.innerHTML = '<p>服务器上没有可下载的文件。</p>';
+                } else {
+                    listContentDiv.innerHTML = `<p style="color: red;">加载文件列表失败: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                listContentDiv.innerHTML = `<p style="color: red;">网络错误，无法连接服务器。</p>`;
+            });
+        }
+
+        // --- 事件绑定 ---
+        document.getElementById('message_input').addEventListener('keyup', event => {
+            if (event.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
