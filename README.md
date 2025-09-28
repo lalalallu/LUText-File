@@ -11,4 +11,4 @@ pip install flask
 pip install flask_socketio
 
 
-python3 app.py
+python3 app.py or python app.py
