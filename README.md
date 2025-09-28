@@ -1,4 +1,10 @@
-source lutext/bin/activate
+python -m venv lutext
+
+#windows
+  lutext\Scripts\activate
+
+#Ubuntu
+  source lutext/bin/activate
 
 pip install flask
 
